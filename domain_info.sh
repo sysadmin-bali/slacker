@@ -33,16 +33,24 @@ display_records() {
   fi
 }
 
-# Function to display PTR records
-display_ptr_records() {
-  local ip_address=$1
-  local ptr_info=$(dig +short -x $ip_address)
-  display_records "PTR" "$ptr_info"
+# Function to display A and PTR records
+display_a-ptr_records() {
+  local record_type=$1
+  local ip_addresses=$2
+  [ -z "${ip_addresses}" ] && printf "${RED}%4s record: -${RESET}\n" ${record_type} && return
+  for ip in $ip_addresses ; do
+     local ptr_info=$(dig +short -x $ip)
+     if [ -z "${ptr_info}" ] ; then
+        printf "${CYAN}%4s record:${RESET} %-24s \t${RED}PTR: - ${RESET}\n" ${record_type} ${ip}
+    else
+        printf "${CYAN}%4s record:${RESET} %-24s \t${CYAN}PTR:${RESET} %s${RESET}\n" ${record_type} ${ip} ${ptr_info}
+     fi
+  done
 }
 
 # Function to display SSL information
 display_ssl_info() {
-  local openssl_info=$(openssl s_client -showcerts -connect $domain:443 </dev/null 2>/dev/null | openssl x509 -noout -issuer -dates -subject 2>/dev/null)
+  local openssl_info=$(openssl s_client -showcerts -connect $domain:443 -servername $domain </dev/null 2>/dev/null | openssl x509 -noout -subject -dates -ext subjectAltName -issuer 2>/dev/null | grep -v X509v3)
   if [ $? -eq 0 ]; then
     echo -e "\n${CYAN}[SSL Information]${RESET}"
     echo "$openssl_info" | sed 's/^/  /'
@@ -56,15 +64,17 @@ display_dns_info() {
   local dns_server=$1
 
   a_record=$(dig +short @$dns_server $domain A)
-  display_records "A" "$a_record"
+  display_a-ptr_records "A" "$a_record"
 
   aaaa_record=$(dig +short @$dns_server $domain AAAA)
-  display_records "AAAA" "$aaaa_record"
+  display_a-ptr_records "AAAA" "$aaaa_record"
 
-  mx_record=$(dig +short @$dns_server $domain MX)
+  echo
+
+  mx_record=$(dig +short @$dns_server $domain MX | sort -n)
   display_records "MX" "$mx_record"
 
-  mail_record=$(dig @$dns_server mail.$domain A | awk '{print $4 "\t" $5}')
+  mail_record=$(dig +noall +answer @$dns_server mail.$domain A | awk '{print $4 "\t" $5}')
   display_records "MAIL" "$mail_record"
 
   txt_record=$(dig +short @$dns_server $domain TXT)
@@ -72,16 +82,6 @@ display_dns_info() {
 
   ns_record=$(dig +short @$dns_server $domain NS)
   display_records "NS" "$ns_record"
-
-  if [ -n "$a_record" ]; then
-    echo -e "\n${CYAN}[PTR Information for IPv4]${RESET}"
-    display_ptr_records "$a_record"
-  fi
-
-  if [ -n "$aaaa_record" ]; then
-    echo -e "\n${CYAN}[PTR Information for IPv6]${RESET}"
-    display_ptr_records "$aaaa_record"
-  fi
 }
 
 # Function to print help
@@ -170,6 +170,7 @@ prompt_for_domain
 dns_server=${dns_server:-$default_dns}
 
 echo -e "\n${YELLOW}============================${RESET}"
+echo -e "${CYAN}Report generated${RESET}: ${GREEN}$(date)${RESET}"
 echo -e "${CYAN}Domain Info${RESET}\t: ${GREEN}$domain${RESET}"
 echo -e "${CYAN}DNS Server\t${RESET}: ${GREEN}$dns_server${RESET}"
 echo -e "${YELLOW}============================\n${RESET}"
